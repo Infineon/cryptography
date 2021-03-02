@@ -295,10 +295,9 @@ class _EllipticCurvePublicKey(ec.EllipticCurvePublicKey):
             self._backend, self, signature, signature_algorithm.algorithm
         )
 
-    def public_numbers(self) -> ec.EllipticCurvePublicNumbers:
-        get_func, group = self._backend._ec_key_determine_group_get_func(
-            self._ec_key
-        )
+    def public_numbers(self):
+        group = self._lib.EC_KEY_get0_group(self._ec_key)
+        get_func = self._backend._ec_key_determine_group_get_func(group)
         point = self._backend._lib.EC_KEY_get0_public_key(self._ec_key)
         self._backend.openssl_assert(point != self._backend._ffi.NULL)
 

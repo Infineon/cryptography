@@ -211,6 +211,12 @@ class EllipticCurveBackend(metaclass=abc.ABCMeta):
         """
 
     @abc.abstractmethod
+    def elliptic_curve_parameters(self, curve):
+        """
+        Returns curve parameters (p, a, b, xG, yG) as a tuple of integers
+        """
+
+    @abc.abstractmethod
     def load_elliptic_curve_public_numbers(self, numbers):
         """
         Return an EllipticCurvePublicKey provider using the given numbers.

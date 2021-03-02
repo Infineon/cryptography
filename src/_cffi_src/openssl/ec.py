@@ -37,6 +37,8 @@ int EC_GROUP_get_degree(const EC_GROUP *);
 
 const EC_METHOD *EC_GROUP_method_of(const EC_GROUP *);
 const EC_POINT *EC_GROUP_get0_generator(const EC_GROUP *);
+int EC_GROUP_get_curve(const EC_GROUP *, BIGNUM *, BIGNUM *, BIGNUM *,
+    BN_CTX *);
 int EC_GROUP_get_curve_name(const EC_GROUP *);
 
 size_t EC_get_builtin_curves(EC_builtin_curve *, size_t);

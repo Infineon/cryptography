@@ -265,6 +265,28 @@ def test_ec_key_key_size(backend):
     assert key.public_key().key_size == 256
 
 
+def test_ec_curve_parameters(backend):
+    curve = ec.SECP256R1()
+    _skip_curve_unsupported(backend, curve)
+
+    (p, a, b, xG, yG) = backend.elliptic_curve_parameters(curve)
+    assert p == int(
+        "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16
+    )
+    assert a == int(
+        "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFC", 16
+    )
+    assert b == int(
+        "5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B", 16
+    )
+    assert xG == int(
+        "6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296", 16
+    )
+    assert yG == int(
+        "4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5", 16
+    )
+
+
 class TestECWithNumbers(object):
     def test_with_numbers(self, backend, subtests):
         vectors = itertools.product(

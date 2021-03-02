@@ -396,7 +396,16 @@ A specific ``backend`` may provide one or more of these interfaces.
 
         :returns: True if the signature algorithm and curve are supported by this backend.
 
+    .. method:: elliptic_curve_parameters(curve)
+
+        :param curve: An instance of
+            :class:`~cryptography.hazmat.primitives.asymmetric.ec.EllipticCurve`.
+
+        :returns: Curve parameters (p, a, b, xG, yG) as a tuple of integers
+
     .. method:: generate_elliptic_curve_private_key(curve)
+
+        .. versionadded:: 35.0.0
 
         :param curve: An instance of
             :class:`~cryptography.hazmat.primitives.asymmetric.ec.EllipticCurve`.

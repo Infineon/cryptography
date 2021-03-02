@@ -1532,6 +1532,35 @@ class Backend(BackendInterface):
 
         return self.elliptic_curve_supported(curve)
 
+    def elliptic_curve_parameters(self, curve):
+        curve_nid = self._elliptic_curve_to_nid(curve)
+
+        group = self._lib.EC_GROUP_new_by_curve_name(curve_nid)
+        self.openssl_assert(group != self._ffi.NULL)
+        group = self._ffi.gc(group, self._lib.EC_GROUP_free)
+
+        get_func = self._ec_key_determine_group_get_func(group)
+        gen = self._lib.EC_GROUP_get0_generator(group)
+        self.openssl_assert(gen != self._ffi.NULL)
+
+        with self._tmp_bn_ctx() as bn_ctx:
+            p = self._lib.BN_CTX_get(bn_ctx)
+            a = self._lib.BN_CTX_get(bn_ctx)
+            b = self._lib.BN_CTX_get(bn_ctx)
+            xG = self._lib.BN_CTX_get(bn_ctx)
+            yG = self._lib.BN_CTX_get(bn_ctx)
+
+            res = self._lib.EC_GROUP_get_curve(group, p, a, b, bn_ctx)
+            self.openssl_assert(res == 1)
+
+            res = get_func(group, gen, xG, yG, bn_ctx)
+            self.openssl_assert(res == 1)
+
+            return (
+                self._bn_to_int(p), self._bn_to_int(a), self._bn_to_int(b),
+                self._bn_to_int(xG), self._bn_to_int(yG)
+            )
+
     def generate_elliptic_curve_private_key(self, curve):
         """
         Generate a new private key on the named curve.
@@ -1602,8 +1631,9 @@ class Backend(BackendInterface):
 
     def derive_elliptic_curve_private_key(self, private_value, curve):
         ec_cdata = self._ec_key_new_by_curve(curve)
-
-        get_func, group = self._ec_key_determine_group_get_func(ec_cdata)
+        group = self._lib.EC_KEY_get0_group(ec_cdata)
+        self.openssl_assert(group != self._ffi.NULL)
+        get_func = self._ec_key_determine_group_get_func(group)
 
         point = self._lib.EC_POINT_new(group)
         self.openssl_assert(point != self._ffi.NULL)
@@ -1824,18 +1854,15 @@ class Backend(BackendInterface):
         finally:
             self._lib.BN_CTX_end(bn_ctx)
 
-    def _ec_key_determine_group_get_func(self, ctx):
+    def _ec_key_determine_group_get_func(self, group):
         """
-        Given an EC_KEY determine the group and what function is required to
+        Given an EC_GROUP determine the what function is required to
         get point coordinates.
         """
-        self.openssl_assert(ctx != self._ffi.NULL)
+        self.openssl_assert(group != self._ffi.NULL)
 
         nid_two_field = self._lib.OBJ_sn2nid(b"characteristic-two-field")
         self.openssl_assert(nid_two_field != self._lib.NID_undef)
-
-        group = self._lib.EC_KEY_get0_group(ctx)
-        self.openssl_assert(group != self._ffi.NULL)
 
         method = self._lib.EC_GROUP_method_of(group)
         self.openssl_assert(method != self._ffi.NULL)
@@ -1850,7 +1877,7 @@ class Backend(BackendInterface):
 
         assert get_func
 
-        return get_func, group
+        return get_func
 
     def _ec_key_set_public_key_affine_coordinates(self, ctx, x, y):
         """
