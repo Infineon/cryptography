@@ -10,7 +10,6 @@ from cryptography.exceptions import (
     _Reasons,
 )
 from cryptography.hazmat.backends.openssl.utils import (
-    _calculate_digest_and_algorithm,
     _check_not_prehashed,
     _warn_sign_verify_deprecated,
 )
@@ -20,12 +19,16 @@ from cryptography.hazmat.primitives.asymmetric import (
     AsymmetricVerificationContext,
     ec,
 )
+from cryptography.hazmat.primitives.asymmetric.utils import (
+    Prehashed,
+    sm2_z_hash,
+)
 
 
 def _check_signature_algorithm(
     signature_algorithm: ec.EllipticCurveSignatureAlgorithm,
 ):
-    if not isinstance(signature_algorithm, ec.ECDSA):
+    if not isinstance(signature_algorithm, (ec.ECDSA, ec.SM2Sign)):
         raise UnsupportedAlgorithm(
             "Unsupported elliptic curve signature algorithm.",
             _Reasons.UNSUPPORTED_PUBLIC_KEY_ALGORITHM,
@@ -84,26 +87,129 @@ def _sn_to_elliptic_curve(backend, sn):
         )
 
 
-def _ecdsa_sig_sign(backend, private_key, data):
-    max_size = backend._lib.ECDSA_size(private_key._ec_key)
-    backend.openssl_assert(max_size > 0)
+def _ec_calculate_digest_and_algorithm(backend, data, signature_algorithm,
+                                       public_key):
+    algorithm = signature_algorithm._algorithm
+    if not isinstance(algorithm, Prehashed):
+        hash_ctx = hashes.Hash(algorithm, backend)
+        if isinstance(signature_algorithm, ec.SM2Sign):
+            z = sm2_z_hash(
+                algorithm, signature_algorithm.user_id, public_key, backend
+            )
+            hash_ctx.update(z)
+        hash_ctx.update(data)
+        data = hash_ctx.finalize()
+    else:
+        algorithm = algorithm._algorithm
 
-    sigbuf = backend._ffi.new("unsigned char[]", max_size)
-    siglen_ptr = backend._ffi.new("unsigned int[]", 1)
-    res = backend._lib.ECDSA_sign(
-        0, data, len(data), sigbuf, siglen_ptr, private_key._ec_key
-    )
-    backend.openssl_assert(res == 1)
-    return backend._ffi.buffer(sigbuf)[: siglen_ptr[0]]
+    if len(data) != algorithm.digest_size:
+        raise ValueError(
+            "The provided data must be the same length as the hash "
+            "algorithm's digest size."
+        )
+
+    return (data, algorithm)
 
 
-def _ecdsa_sig_verify(backend, public_key, signature, data):
-    res = backend._lib.ECDSA_verify(
-        0, data, len(data), signature, len(signature), public_key._ec_key
-    )
-    if res != 1:
-        backend._consume_errors()
-        raise InvalidSignature
+def _ec_sig_sign(backend, private_key, data, signature_algorithm):
+    old_type = backend._lib.EVP_PKEY_id(private_key._evp_pkey)
+    try:
+        if isinstance(signature_algorithm, ec.SM2Sign):
+            res = backend._lib.EVP_PKEY_set_alias_type(
+                private_key._evp_pkey, backend._lib.EVP_PKEY_SM2
+            )
+            backend.openssl_assert(res == 1)
+        elif isinstance(signature_algorithm, ec.ECDSA):
+            res = backend._lib.EVP_PKEY_set_alias_type(
+                private_key._evp_pkey, backend._lib.EVP_PKEY_EC
+            )
+            backend.openssl_assert(res == 1)
+        else:
+            raise TypeError(
+                "EC signing is only supported with ECDSA and SM2 signature "
+                "algorithms."
+            )
+
+        pctx = backend._lib.EVP_PKEY_CTX_new(
+            private_key._evp_pkey, backend._ffi.NULL)
+        pctx = backend._ffi.gc(pctx, backend._lib.EVP_PKEY_CTX_free)
+
+        res = backend._lib.EVP_PKEY_sign_init(pctx)
+        backend.openssl_assert(res == 1)
+
+        hash_algorithm = signature_algorithm._algorithm
+        if isinstance(hash_algorithm, Prehashed):
+            hash_algorithm = signature_algorithm._algorithm._algorithm
+        evp_md = backend._evp_md_from_algorithm(
+            hash_algorithm
+        )
+        res = backend._lib.EVP_PKEY_CTX_set_signature_md(pctx, evp_md)
+        backend.openssl_assert(res == 1)
+
+        siglen_ptr = backend._ffi.new("size_t[]", 1)
+        res = backend._lib.EVP_PKEY_sign(
+            pctx, backend._ffi.NULL, siglen_ptr, data, len(data)
+        )
+        backend.openssl_assert(res == 1)
+
+        sigbuf = backend._ffi.new("unsigned char[]", siglen_ptr[0])
+        res = backend._lib.EVP_PKEY_sign(pctx, sigbuf, siglen_ptr, data, len(data))
+        backend.openssl_assert(res == 1)
+        return backend._ffi.buffer(sigbuf)[:siglen_ptr[0]]
+    finally:
+        res = backend._lib.EVP_PKEY_set_alias_type(
+            private_key._evp_pkey, old_type
+        )
+        backend.openssl_assert(res == 1)
+
+
+def _ec_sig_verify(backend, public_key, signature, data,
+                   signature_algorithm):
+    old_type = backend._lib.EVP_PKEY_id(public_key._evp_pkey)
+    try:
+        if isinstance(signature_algorithm, ec.SM2Sign):
+            res = backend._lib.EVP_PKEY_set_alias_type(
+                public_key._evp_pkey, backend._lib.EVP_PKEY_SM2
+            )
+            backend.openssl_assert(res == 1)
+        elif isinstance(signature_algorithm, ec.ECDSA):
+            res = backend._lib.EVP_PKEY_set_alias_type(
+                public_key._evp_pkey, backend._lib.EVP_PKEY_EC
+            )
+            backend.openssl_assert(res == 1)
+        else:
+            raise TypeError(
+                "EC verifying is only supported with ECDSA and SM2 signature "
+                "algorithms."
+            )
+        pctx = backend._lib.EVP_PKEY_CTX_new(
+            public_key._evp_pkey, backend._ffi.NULL
+        )
+        pctx = backend._ffi.gc(pctx, backend._lib.EVP_PKEY_CTX_free)
+
+        res = backend._lib.EVP_PKEY_verify_init(pctx)
+        backend.openssl_assert(res == 1)
+
+        hash_algorithm = signature_algorithm._algorithm
+        if isinstance(hash_algorithm, Prehashed):
+            hash_algorithm = signature_algorithm._algorithm._algorithm
+        evp_md = backend._evp_md_from_algorithm(
+            hash_algorithm
+        )
+        res = backend._lib.EVP_PKEY_CTX_set_signature_md(pctx, evp_md)
+        backend.openssl_assert(res == 1)
+
+        res = backend._lib.EVP_PKEY_verify(
+            pctx, signature, len(signature), data, len(data)
+        )
+        if res != 1:
+            backend._consume_errors()
+            raise InvalidSignature
+    finally:
+        res = backend._lib.EVP_PKEY_set_alias_type(
+            public_key._evp_pkey, old_type
+        )
+        backend.openssl_assert(res == 1)
 
 
 class _ECDSASignatureContext(AsymmetricSignatureContext):
@@ -111,11 +217,13 @@ class _ECDSASignatureContext(AsymmetricSignatureContext):
         self,
         backend,
         private_key: ec.EllipticCurvePrivateKey,
-        algorithm: hashes.HashAlgorithm,
+        signature_algorithm: ec.EllipticCurveSignatureAlgorithm,
     ):
+    def __init__(self, backend, private_key, signature_algorithm):
         self._backend = backend
         self._private_key = private_key
-        self._digest = hashes.Hash(algorithm, backend)
+        self._digest = hashes.Hash(signature_algorithm.algorithm, backend)
+        self._signature_algorithm = signature_algorithm
 
     def update(self, data: bytes) -> None:
         self._digest.update(data)
@@ -123,7 +231,9 @@ class _ECDSASignatureContext(AsymmetricSignatureContext):
     def finalize(self) -> bytes:
         digest = self._digest.finalize()
 
-        return _ecdsa_sig_sign(self._backend, self._private_key, digest)
+        return _ec_sig_sign(
+            self._backend, self._private_key, digest, self._signature_algorithm
+        )
 
 
 class _ECDSAVerificationContext(AsymmetricVerificationContext):
@@ -132,20 +242,22 @@ class _ECDSAVerificationContext(AsymmetricVerificationContext):
         backend,
         public_key: ec.EllipticCurvePublicKey,
         signature: bytes,
-        algorithm: hashes.HashAlgorithm,
+        signature_algorithm: ec.EllipticCurveSignatureAlgorithm,
     ):
         self._backend = backend
         self._public_key = public_key
         self._signature = signature
-        self._digest = hashes.Hash(algorithm, backend)
+        self._digest = hashes.Hash(signature_algorithm.algorithm, backend)
+        self._signature_algorithm = signature_algorithm
 
     def update(self, data: bytes) -> None:
         self._digest.update(data)
 
     def verify(self) -> None:
         digest = self._digest.finalize()
-        _ecdsa_sig_verify(
-            self._backend, self._public_key, self._signature, digest
+        _ec_sig_verify(
+            self._backend, self._public_key, self._signature, digest,
+            self._signature_algorithm
         )
 
 
@@ -174,7 +286,7 @@ class _EllipticCurvePrivateKey(ec.EllipticCurvePrivateKey):
         # This assert is to help mypy realize what type this object holds
         assert isinstance(signature_algorithm.algorithm, hashes.HashAlgorithm)
         return _ECDSASignatureContext(
-            self._backend, self, signature_algorithm.algorithm
+            self._backend, self, signature_algorithm
         )
 
     def exchange(
@@ -259,8 +371,9 @@ class _EllipticCurvePrivateKey(ec.EllipticCurvePrivateKey):
             self._backend,
             data,
             signature_algorithm._algorithm,  # type: ignore[attr-defined]
+            self.public_key()
         )
-        return _ecdsa_sig_sign(self._backend, self, data)
+        return _ec_sig_sign(self._backend, self, data, signature_algorithm)
 
 
 class _EllipticCurvePublicKey(ec.EllipticCurvePublicKey):
@@ -292,11 +405,11 @@ class _EllipticCurvePublicKey(ec.EllipticCurvePublicKey):
         # This assert is to help mypy realize what type this object holds
         assert isinstance(signature_algorithm.algorithm, hashes.HashAlgorithm)
         return _ECDSAVerificationContext(
-            self._backend, self, signature, signature_algorithm.algorithm
+            self._backend, self, signature, signature_algorithm
         )
 
     def public_numbers(self):
-        group = self._lib.EC_KEY_get0_group(self._ec_key)
+        group = self._backend._lib.EC_KEY_get0_group(self._ec_key)
         get_func = self._backend._ec_key_determine_group_get_func(group)
         point = self._backend._lib.EC_KEY_get0_public_key(self._ec_key)
         self._backend.openssl_assert(point != self._backend._ffi.NULL)
@@ -374,4 +487,6 @@ class _EllipticCurvePublicKey(ec.EllipticCurvePublicKey):
             data,
             signature_algorithm._algorithm,  # type: ignore[attr-defined]
         )
-        _ecdsa_sig_verify(self._backend, self, signature, data)
+        _ec_sig_verify(
+            self._backend, self, signature, data, signature_algorithm
+        )

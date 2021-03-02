@@ -39,6 +39,7 @@ class EllipticCurveOID(object):
     SECT409R1 = ObjectIdentifier("1.3.132.0.37")
     SECT571K1 = ObjectIdentifier("1.3.132.0.38")
     SECT571R1 = ObjectIdentifier("1.3.132.0.39")
+    SM2P256V1 = ObjectIdentifier("1.2.156.10197.1.301")
 
 
 class EllipticCurve(metaclass=abc.ABCMeta):
@@ -56,6 +57,12 @@ class EllipticCurve(metaclass=abc.ABCMeta):
 
 
 class EllipticCurveSignatureAlgorithm(metaclass=abc.ABCMeta):
+    @abc.abstractproperty
+    def name(self):
+        """
+        A string naming this encryption algorithm (e.g. "ECDSA", "SM2Sign").
+        """
+
     @abc.abstractproperty
     def algorithm(
         self,
@@ -301,6 +308,12 @@ class BrainpoolP512R1(EllipticCurve):
     key_size = 512
 
 
+@utils.register_interface(EllipticCurve)
+class SM2P256V1(object):
+    name = "sm2p256v1"
+    key_size = 256
+
+
 _CURVE_TYPES: typing.Dict[str, typing.Type[EllipticCurve]] = {
     "prime192v1": SECP192R1,
     "prime256v1": SECP256R1,
@@ -323,10 +336,14 @@ _CURVE_TYPES: typing.Dict[str, typing.Type[EllipticCurve]] = {
     "brainpoolP256r1": BrainpoolP256R1,
     "brainpoolP384r1": BrainpoolP384R1,
     "brainpoolP512r1": BrainpoolP512R1,
+    "sm2p256v1": SM2P256V1,
+    "SM2": SM2P256V1,
 }
 
 
 class ECDSA(EllipticCurveSignatureAlgorithm):
+    name = "ECDSA"
+
     def __init__(
         self,
         algorithm: typing.Union[asym_utils.Prehashed, hashes.HashAlgorithm],
@@ -338,6 +355,39 @@ class ECDSA(EllipticCurveSignatureAlgorithm):
         self,
     ) -> typing.Union[asym_utils.Prehashed, hashes.HashAlgorithm]:
         return self._algorithm
+
+
+SM2_DEFAULT_USER_ID = b'1234567812345678'
+
+
+@utils.register_interface(EllipticCurveSignatureAlgorithm)
+class SM2Sign(object):
+    name = "SM2Sign"
+
+    def __init__(
+        self,
+        algorithm: typing.Union[asym_utils.Prehashed, hashes.HashAlgorithm],
+        user_id: bytes
+    ):
+        utils._check_bytes("user_id", user_id)
+        underlying_hash = algorithm
+        if isinstance(algorithm, Prehashed):
+            underlying_hash = algorithm._algorithm
+        if not isinstance(underlying_hash, SM3):
+            raise TypeError("SM2Sign only supports SM3")
+
+        self._user_id = user_id
+        self._algorithm = algorithm
+
+    @property
+    def algorithm(
+        self,
+    ) -> typing.Union[asym_utils.Prehashed, hashes.HashAlgorithm]:
+        return self._algorithm
+
+    @property
+    def user_id(self) -> bytes:
+        return self._user_id
 
 
 def generate_private_key(
@@ -520,6 +570,7 @@ _OID_TO_CURVE = {
     EllipticCurveOID.SECT409R1: SECT409R1,
     EllipticCurveOID.SECT571K1: SECT571K1,
     EllipticCurveOID.SECT571R1: SECT571R1,
+    EllipticCurveOID.SM2P256V1: SM2P256V1,
 }
 
 

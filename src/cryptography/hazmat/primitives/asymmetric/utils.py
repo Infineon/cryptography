@@ -30,6 +30,24 @@ def encode_dss_signature(r: int, s: int) -> bytes:
     )
 
 
+def sm2_z_hash(hash_algorithm, user_id, public_key, backend):
+    digest = hashes.Hash(hash_algorithm, backend)
+    digest.update(utils.int_to_bytes(len(user_id) * 8, 2))
+    digest.update(user_id)
+
+    p, a, b, xg, yg = backend.elliptic_curve_parameters(public_key.curve)
+    p_len = (p.bit_length() + 7) // 8
+    public_numbers = public_key.public_numbers()
+
+    digest.update(utils.int_to_bytes(a, p_len))
+    digest.update(utils.int_to_bytes(b, p_len))
+    digest.update(utils.int_to_bytes(xg, p_len))
+    digest.update(utils.int_to_bytes(yg, p_len))
+    digest.update(utils.int_to_bytes(public_numbers.x, p_len))
+    digest.update(utils.int_to_bytes(public_numbers.y, p_len))
+    return digest.finalize()
+
+
 class Prehashed(object):
     def __init__(self, algorithm: hashes.HashAlgorithm):
         if not isinstance(algorithm, hashes.HashAlgorithm):

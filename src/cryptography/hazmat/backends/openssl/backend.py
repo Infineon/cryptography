@@ -1831,7 +1831,10 @@ class Backend(BackendInterface):
         Get the NID for a curve name.
         """
 
-        curve_aliases = {"secp192r1": "prime192v1", "secp256r1": "prime256v1"}
+        curve_aliases = {
+            "secp192r1": "prime192v1", "secp256r1": "prime256v1",
+            "sm2p256v1": "SM2"
+        }
 
         curve_name = curve_aliases.get(curve.name, curve.name)
 

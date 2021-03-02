@@ -128,6 +128,115 @@ Elliptic Curve Signature Algorithms
         sources.
 
 
+.. class:: SM2Sign(algorithm, user_id)
+
+    .. versionadded:: 35.0.0
+
+    The SM2 signature algorithm was first standardized in OSCCA publication
+    `GM/T 0003-2012 Part 2`_, and later in `ISO/IEC 14888-3:2018`_. SM2 is
+    currently only supported with the SM3 hash algorithm. Before hashing, the
+    message is prepended with another hash (called Z) that incorporates a user
+    id string, the signing public key, and parameters of the curve.
+
+    :param algorithm: An instance of
+        :class:`~cryptography.hazmat.primitives.hashes.HashAlgorithm`.
+
+    :param bytes user_id: An byte string identifying the user creating the
+        signature. A default value of `b'1234567812345678'` is sometimes used.
+
+    .. doctest::
+
+        >>> from cryptography.hazmat.primitives import hashes
+        >>> from cryptography.hazmat.primitives.asymmetric import ec
+        >>> private_key = ec.generate_private_key(
+        ...     ec.SM2P256V1()
+        ... )
+        >>> data = b"this is some data I'd like to sign"
+        >>> signature = private_key.sign(
+        ...     data,
+        ...     ec.SM2Sign(hashes.SM3(), b'test@example.com')
+        ... )
+
+    The ``signature`` is a ``bytes`` object, whose contents are DER encoded as
+    described in :rfc:`3279`. This can be decoded using
+    :func:`~cryptography.hazmat.primitives.asymmetric.utils.decode_dss_signature`.
+
+    If your data is too large to be passed in a single call, you can hash it
+    separately and pass that value using
+    :class:`~cryptography.hazmat.primitives.asymmetric.utils.Prehashed`. Due to
+    how SM2 hashes the `user_id` and key parameters before the message, users
+    of :class:`SM2Sign` with
+    :class:`~cryptography.hazmat.primitives.asymmetric.utils.Prehashed` must
+    ensure this prefix is already included. The function
+    :func:`~cryptography.hazmat.primitives.asymmetric.utils.sm2_z_hash` can
+    calculate this hash.
+
+    .. doctest::
+
+        >>> from cryptography.hazmat.primitives.asymmetric import utils
+        >>> chosen_hash = hashes.SM3()
+        >>> hasher = hashes.Hash(chosen_hash)
+        >>> hasher.update(utils.sm2_z_hash(
+        >>>     backend, chosen_hash, b'test@example.com',
+        >>>     private_key.public_key()
+        >>> ))
+        >>> hasher.update(b"data & ")
+        >>> hasher.update(b"more data")
+        >>> digest = hasher.finalize()
+        >>> sig = private_key.sign(
+        ...     digest,
+        ...     ec.SM2Sign(utils.Prehashed(chosen_hash), b'test@example.com')
+        ... )
+
+
+    Verification requires the public key, the DER-encoded signature itself, the
+    signed data, and knowledge of the hashing algorithm that was used when
+    producing the signature:
+
+    >>> public_key = private_key.public_key()
+    >>> public_key.verify(
+    ...     signature, data,
+    ...     ec.SM2Sign(chosen_hash, b'test@example.com')
+    ... )
+
+    As above, the ``signature`` is a ``bytes`` object whose contents are DER
+    encoded as described in :rfc:`3279`. It can be created from a raw ``(r,s)``
+    pair by using
+    :func:`~cryptography.hazmat.primitives.asymmetric.utils.encode_dss_signature`.
+
+    If the signature is not valid, an
+    :class:`~cryptography.exceptions.InvalidSignature` exception will be raised.
+
+    If your data is too large to be passed in a single call, you can hash it
+    separately and pass that value using
+    :class:`~cryptography.hazmat.primitives.asymmetric.utils.Prehashed`.
+
+    .. doctest::
+
+        >>> from cryptography.hazmat.primitives.asymmetric import utils
+        >>> chosen_hash = hashes.SM3()
+        >>> hasher = hashes.Hash(chosen_hash)
+        >>> hasher.update(utils.sm2_z_hash(
+        ...     backend, chosen_hash, b'test@example.com', public_key
+        ... ))
+        >>> hasher.update(b"data & ")
+        >>> hasher.update(b"more data")
+        >>> digest = hasher.finalize()
+        >>> public_key.verify(
+        ...     sig,
+        ...     digest,
+        ...     ec.SM2Sign(utils.Prehashed(chosen_hash), b'test@example.com')
+        ... )
+
+    .. note::
+        Although in this case the public key was derived from the private one,
+        in a typical setting you will not possess the private key. The
+        `Key loading`_ section explains how to load the public key from other
+        sources.
+
+Elliptic Curve Key Parameters
+-----------------------------
+
 .. class:: EllipticCurvePrivateNumbers(private_value, public_numbers)
 
     .. versionadded:: 0.5
@@ -969,3 +1078,5 @@ Elliptic Curve Object Identifiers
 .. _`forward secrecy`: https://en.wikipedia.org/wiki/Forward_secrecy
 .. _`SEC 1 v2.0`: https://www.secg.org/sec1-v2.pdf
 .. _`bad cryptographic practice`: https://crypto.stackexchange.com/a/3313
+.. _`GM/T 0003-2012 Part 2`: http://www.gmbz.org.cn/upload/2018-07-24/1532401673138056311.pdf
+.. _`ISO/IEC 14888-3:2018`: https://www.iso.org/standard/76382.html

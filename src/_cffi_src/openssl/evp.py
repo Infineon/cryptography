@@ -25,6 +25,7 @@ static const int EVP_PKEY_ED25519;
 static const int EVP_PKEY_X448;
 static const int EVP_PKEY_ED448;
 static const int EVP_PKEY_POLY1305;
+static const int EVP_PKEY_SM2;
 static const int EVP_MAX_MD_SIZE;
 static const int EVP_CTRL_AEAD_SET_IVLEN;
 static const int EVP_CTRL_AEAD_GET_TAG;
@@ -119,6 +120,7 @@ int EVP_PKEY_derive_init(EVP_PKEY_CTX *);
 int EVP_PKEY_derive_set_peer(EVP_PKEY_CTX *, EVP_PKEY *);
 int EVP_PKEY_derive(EVP_PKEY_CTX *, unsigned char *, size_t *);
 int EVP_PKEY_set_type(EVP_PKEY *, int);
+int EVP_PKEY_set_alias_type(EVP_PKEY *pkey, int type);
 
 int EVP_PKEY_id(const EVP_PKEY *);
 int Cryptography_EVP_PKEY_id(const EVP_PKEY *);
@@ -154,6 +156,7 @@ int PKCS5_PBKDF2_HMAC(const char *, int, const unsigned char *, int, int,
                       const EVP_MD *, int, unsigned char *);
 
 int EVP_PKEY_CTX_set_signature_md(EVP_PKEY_CTX *, const EVP_MD *);
+int EVP_PKEY_CTX_set1_id(EVP_PKEY_CTX *, void *, size_t);
 
 int EVP_PBE_scrypt(const char *, size_t, const unsigned char *, size_t,
                    uint64_t, uint64_t, uint64_t, uint64_t, unsigned char *,
